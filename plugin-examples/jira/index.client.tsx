@@ -1,11 +1,14 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { IssuesPanel } from "./client/issues-panel";
+import { JiraSurface } from "./client/jira-surface";
 import { ConnectionSettings } from "./client/settings";
 import { startIssueAgent } from "./client/start-agent";
 import { getIssueRpc, issueAttachments, JIRA_ISSUE_KEY } from "./shared/issues";
 
 export default function contribute(client: PluginClientContext) {
   client.addAttachmentSource(issueAttachments);
+  client.addSurface("jira", JiraSurface);
+  client.addSidebarItem({ id: "jira", title: "Jira", icon: "SquareKanban", surface: "jira" });
   client.addSettingsScreen({
     id: "connection",
     title: "Jira",

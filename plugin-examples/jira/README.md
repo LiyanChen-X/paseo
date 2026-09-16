@@ -9,7 +9,10 @@ This example connects Paseo to Jira Cloud or Jira Server / Data Center and adds:
 - The `/jira PROJ-123` slash command, which loads that issue and starts an agent on it in the
   current workspace.
 - Command Center items **Start agent from Jira issue** and **Configure Jira connection**.
-- A **Jira** settings screen for the connection, default JQL, agent provider, and start prompt.
+- A **Jira** sidebar page with the connection form, a workspace picker, and the issue browser, so
+  you can configure Jira and start agents without opening a workspace first.
+- A **Jira** settings screen for the connection, default JQL, agent provider, and start prompt. It
+  renders the same form as the sidebar page; both read and write one host-scoped settings document.
 
 ## Configure
 
@@ -20,7 +23,7 @@ paseo plugin add /absolute/path/to/paseo/plugin-examples/jira
 paseo plugin ls jira
 ```
 
-Open **Settings → Jira** and fill in the connection:
+Open **Jira** in the sidebar (or **Settings → Jira**) and fill in the connection:
 
 | Deployment                | Base URL                          | Credentials                                                                                     |
 | ------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -46,6 +49,9 @@ export JIRA_KIND="cloud"   # or "server"
   Atlassian Document Format descriptions to text; Server uses `/rest/api/2` with Bearer or Basic
   auth. Exact keys fetch one issue with recent comments; everything else runs as JQL.
 - `server/issues.ts` resolves settings and environment, then handles the RPCs in the daemon.
+- `client/settings.tsx` owns the connection form; `client/issue-browser.tsx` owns search, the
+  issue list, and the start-agent mutation. The sidebar surface, the workspace panel, and the
+  settings screen compose those two.
 - `client/start-agent.ts` creates the agent through `paseo.workspaces.ref(id).agents.create` with
   the start prompt followed by the issue snapshot. It uses the configured `provider/model` or the
   first ready provider.

@@ -25,7 +25,7 @@ const kinds = [
   { label: "Jira Server / Data Center", value: "server" },
 ] as const;
 
-function ConnectionForm({
+export function ConnectionForm({
   settings,
   theme,
 }: {
