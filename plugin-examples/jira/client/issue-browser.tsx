@@ -8,36 +8,35 @@ import {
 } from "@getpaseo/plugin/client";
 import { FlatList, TextInput, useToast } from "@getpaseo/plugin/client/react-native";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, type PressableStateCallbackType, Text, View } from "react-native";
 import { getIssueRpc, searchIssuesRpc } from "../shared/issues";
 import { connection } from "../shared/settings";
 import { startIssueAgent } from "./start-agent";
+import { font, radius, space } from "./ui";
 
 const EMPTY_ROWS: IssueRow[] = [];
 const keyExtractor = (item: IssueRow) => item.id;
 
-interface IssueRow {
+export interface IssueRow {
   id: string;
   identifier: string;
   title: string;
   subtitle?: string;
 }
 
-/** Loads an issue and starts an agent on it in the given workspace. */
-export function useStartIssue({
-  workspaceId,
-  navigation,
-}: {
-  workspaceId: string | null;
-  navigation: PluginSurfaceProps["navigation"];
-}) {
+export interface StartIssueInput {
+  key: string;
+  workspaceId: string;
+}
+
+/** Loads an issue and starts an agent on it. Opens the agent when the host supports navigation. */
+export function useStartIssue(navigation: PluginSurfaceProps["navigation"]) {
   const paseo = usePaseo();
   const toast = useToast();
   const settings = useSettings(connection);
   const getIssue = useRpc(getIssueRpc);
   return useMutation({
-    mutationFn: async (key: string) => {
-      if (!workspaceId) throw new Error("Pick a workspace first.");
+    mutationFn: async ({ key, workspaceId }: StartIssueInput) => {
       const { issue } = await getIssue({ key });
       const values = settings.status === "ready" ? settings.values : undefined;
       return startIssueAgent({
@@ -48,7 +47,7 @@ export function useStartIssue({
         startPrompt: values?.startPrompt,
       });
     },
-    onSuccess: ({ agentId }, key) => {
+    onSuccess: ({ agentId }, { key }) => {
       toast.show(`Started an agent on ${key}`, { variant: "success" });
       navigation?.openAgent({ agentId });
     },
@@ -61,10 +60,18 @@ export interface IssueBrowserProps {
   compact: boolean;
   /** Rendered above the search box. */
   children?: ReactNode;
-  start: ReturnType<typeof useStartIssue>;
+  /** Key of the issue whose agent is starting, for the row's pending label. */
+  startingKey: string | null;
+  onStart(key: string): void;
 }
 
-export function IssueBrowser({ theme, compact, children, start }: IssueBrowserProps) {
+export function IssueBrowser({
+  theme,
+  compact,
+  children,
+  startingKey,
+  onStart,
+}: IssueBrowserProps) {
   const search = useRpc(searchIssuesRpc);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
@@ -74,44 +81,50 @@ export function IssueBrowser({ theme, compact, children, start }: IssueBrowserPr
   });
   const submit = useCallback(() => setQuery(draft.trim()), [draft]);
   const styles = useBrowserStyles(theme, compact);
-  const startIssue = start.mutate;
   const renderItem = useCallback(
     ({ item }: { item: IssueRow }) => (
       <IssueRowView
         item={item}
         styles={styles}
-        pending={start.isPending}
-        starting={start.isPending && start.variables === item.identifier}
-        onStart={startIssue}
+        starting={startingKey === item.identifier}
+        disabled={startingKey !== null}
+        onStart={onStart}
       />
     ),
-    [styles, start.isPending, start.variables, startIssue],
+    [styles, startingKey, onStart],
   );
+  let status: string | null = null;
+  if (issues.isPending) status = "Loading issues…";
+  else if (issues.error) status = issues.error.message;
+  else if (issues.data && issues.data.items.length === 0) status = "No matching issues";
 
   return (
     <View style={styles.screen}>
-      {children}
-      <TextInput
-        accessibilityLabel="Search Jira issues"
-        placeholder="Issue key, JQL, or text. Empty runs your default JQL."
-        placeholderTextColor={theme.colors.foregroundMuted}
-        value={draft}
-        onChangeText={setDraft}
-        onSubmitEditing={submit}
-        returnKeyType="search"
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.input}
-      />
-      {issues.isPending ? <Text style={styles.detail}>Loading issues…</Text> : null}
-      {issues.error ? <Text style={styles.error}>{issues.error.message}</Text> : null}
-      {issues.data && issues.data.items.length === 0 ? (
-        <Text style={styles.detail}>No issues match.</Text>
+      <View style={styles.column}>
+        {children}
+        <TextInput
+          accessibilityLabel="Search Jira issues"
+          placeholder="Search issues, or paste an issue key or JQL"
+          placeholderTextColor={theme.colors.foregroundMuted}
+          value={draft}
+          onChangeText={setDraft}
+          onSubmitEditing={submit}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+      </View>
+      {status ? (
+        <View style={styles.column}>
+          <Text style={issues.error ? styles.error : styles.status}>{status}</Text>
+        </View>
       ) : null}
       <FlatList
         data={issues.data?.items ?? EMPTY_ROWS}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
+        contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
       />
     </View>
@@ -119,72 +132,97 @@ export function IssueBrowser({ theme, compact, children, start }: IssueBrowserPr
 }
 
 function useBrowserStyles(theme: PluginHostProps["theme"], compact: boolean) {
-  return useMemo(
-    () => ({
-      screen: {
-        flex: 1,
-        padding: compact ? 12 : 16,
-        gap: 12,
-        backgroundColor: theme.colors.surface0,
+  return useMemo(() => {
+    const gutter = compact ? space.lg : space.xl;
+    return {
+      screen: { flex: 1, backgroundColor: theme.colors.surface0 },
+      column: {
+        width: "100%" as const,
+        maxWidth: 720,
+        alignSelf: "center" as const,
+        paddingHorizontal: gutter,
+        paddingTop: gutter,
+        gap: space.lg,
+      },
+      list: {
+        width: "100%" as const,
+        maxWidth: 720,
+        alignSelf: "center" as const,
+        paddingHorizontal: gutter,
+        paddingVertical: space.sm,
       },
       input: {
         borderWidth: 1,
         borderColor: theme.colors.border,
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
+        borderRadius: radius.md,
+        paddingHorizontal: space.md,
+        paddingVertical: space.sm + 2,
+        fontSize: font.base,
         color: theme.colors.foreground,
         backgroundColor: theme.colors.surface1,
       },
+      status: {
+        fontSize: font.base,
+        color: theme.colors.foregroundMuted,
+        textAlign: "center" as const,
+      },
+      error: { fontSize: font.sm, color: theme.colors.statusDanger },
       row: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
-        gap: 12,
-        paddingVertical: 10,
+        gap: space.lg,
+        paddingVertical: space.md,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.border,
       },
       rowText: { flex: 1, gap: 2 },
-      key: { color: theme.colors.foregroundMuted, fontSize: 12 },
-      title: { color: theme.colors.foreground },
-      subtitle: { color: theme.colors.foregroundMuted, fontSize: 12 },
-      button: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
-        backgroundColor: theme.colors.accent,
-      },
-      buttonText: { color: theme.colors.accentForeground },
-      detail: { color: theme.colors.foregroundMuted },
-      error: { color: theme.colors.statusDanger },
-    }),
-    [theme, compact],
-  );
+      key: { fontSize: font.sm, color: theme.colors.foregroundMuted },
+      title: { fontSize: font.base, color: theme.colors.foreground },
+      subtitle: { fontSize: font.sm, color: theme.colors.foregroundMuted },
+      buttonText: { fontSize: font.base, color: theme.colors.foreground },
+    };
+  }, [theme, compact]);
 }
 
 interface IssueRowViewProps {
   item: IssueRow;
   styles: ReturnType<typeof useBrowserStyles>;
-  pending: boolean;
   starting: boolean;
+  disabled: boolean;
   onStart(key: string): void;
 }
 
-function IssueRowView({ item, styles, pending, starting, onStart }: IssueRowViewProps) {
+function IssueRowView({ item, styles, starting, disabled, onStart }: IssueRowViewProps) {
   const handleStart = useCallback(() => onStart(item.identifier), [onStart, item.identifier]);
+  const buttonStyle = useCallback(
+    ({ pressed }: PressableStateCallbackType) => ({
+      paddingHorizontal: space.md,
+      paddingVertical: space.sm,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: styles.row.borderBottomColor,
+      opacity: disabled && !starting ? 0.5 : 1,
+      transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
+    }),
+    [styles, disabled, starting],
+  );
   return (
     <View style={styles.row}>
       <View style={styles.rowText}>
-        <Text style={styles.key}>{item.identifier}</Text>
-        <Text style={styles.title}>{item.title}</Text>
-        {item.subtitle ? <Text style={styles.subtitle}>{item.subtitle}</Text> : null}
+        <Text style={styles.key}>
+          {item.identifier}
+          {item.subtitle ? ` · ${item.subtitle}` : ""}
+        </Text>
+        <Text style={styles.title} numberOfLines={2}>
+          {item.title}
+        </Text>
       </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Start agent on ${item.identifier}`}
-        disabled={pending}
+        disabled={disabled}
         onPress={handleStart}
-        style={styles.button}
+        style={buttonStyle}
       >
         <Text style={styles.buttonText}>{starting ? "Starting…" : "Start agent"}</Text>
       </Pressable>

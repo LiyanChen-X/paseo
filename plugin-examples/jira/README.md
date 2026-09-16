@@ -9,10 +9,12 @@ This example connects Paseo to Jira Cloud or Jira Server / Data Center and adds:
 - The `/jira PROJ-123` slash command, which loads that issue and starts an agent on it in the
   current workspace.
 - Command Center items **Start agent from Jira issue** and **Configure Jira connection**.
-- A **Jira** sidebar page with the connection form, a workspace picker, and the issue browser, so
-  you can configure Jira and start agents without opening a workspace first.
-- A **Jira** settings screen for the connection, default JQL, agent provider, and start prompt. It
-  renders the same form as the sidebar page; both read and write one host-scoped settings document.
+- A **Jira** sidebar page. Unconfigured, it shows one setup card whose **Connect** button saves and
+  verifies the credentials in a single step. Connected, it shows the site and signed-in user, a
+  search box, and the issue list; **Start agent** asks which workspace to use when more than one is
+  open.
+- A **Jira** settings screen for the same connection plus default JQL, agent provider, and start
+  prompt. Both surfaces read and write one host-scoped settings document.
 
 ## Configure
 
@@ -23,14 +25,15 @@ paseo plugin add /absolute/path/to/paseo/plugin-examples/jira
 paseo plugin ls jira
 ```
 
-Open **Jira** in the sidebar (or **Settings → Jira**) and fill in the connection:
+Open **Jira** in the sidebar and fill in the setup card (or use **Settings → Jira**):
 
 | Deployment                | Base URL                          | Credentials                                                                                     |
 | ------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Jira Cloud                | `https://your-site.atlassian.net` | Account email plus an [API token](https://id.atlassian.com/manage-profile/security/api-tokens). |
 | Jira Server / Data Center | `https://jira.example.com`        | A personal access token (leave username empty), or username plus password.                      |
 
-Use **Test connection** to verify the saved values. Settings are stored as plain JSON on the daemon
+**Connect** saves and verifies in one step; **Settings → Jira** has a separate **Test connection**
+row. Settings are stored as plain JSON on the daemon
 host. To keep the token out of that file, set these in the daemon environment instead; they
 override the saved values:
 
@@ -49,9 +52,10 @@ export JIRA_KIND="cloud"   # or "server"
   Atlassian Document Format descriptions to text; Server uses `/rest/api/2` with Bearer or Basic
   auth. Exact keys fetch one issue with recent comments; everything else runs as JQL.
 - `server/issues.ts` resolves settings and environment, then handles the RPCs in the daemon.
-- `client/settings.tsx` owns the connection form; `client/issue-browser.tsx` owns search, the
-  issue list, and the start-agent mutation. The sidebar surface, the workspace panel, and the
-  settings screen compose those two.
+- `client/use-connection-draft.ts` owns draft, save, and verify state; `client/connect-card.tsx`
+  (sidebar) and `client/settings.tsx` (host rows) are two views over it. `client/issue-browser.tsx`
+  owns search, the issue list, and the start-agent mutation; the sidebar surface and the workspace
+  panel compose it.
 - `client/start-agent.ts` creates the agent through `paseo.workspaces.ref(id).agents.create` with
   the start prompt followed by the issue snapshot. It uses the configured `provider/model` or the
   first ready provider.

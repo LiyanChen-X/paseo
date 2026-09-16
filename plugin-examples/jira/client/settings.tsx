@@ -1,10 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
-import {
-  type PluginSurfaceProps,
-  type SettingsState,
-  useRpc,
-  useSettings,
-} from "@getpaseo/plugin/client";
+import { type PluginSurfaceProps, useSettings } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import {
   SettingsAction,
@@ -13,108 +7,74 @@ import {
   SettingsSection,
   SettingsSelect,
 } from "@getpaseo/plugin/client/ui";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { Text } from "react-native";
-import { testConnectionRpc } from "../shared/issues";
-import { connection, type ConnectionValues } from "../shared/settings";
+import { connection } from "../shared/settings";
+import {
+  deploymentOptions,
+  type ReadyConnection,
+  useConnectionDraft,
+} from "./use-connection-draft";
 
-type Ready = Extract<SettingsState<typeof connection.schema>, { status: "ready" }>;
-
-const kinds = [
-  { label: "Jira Cloud (Atlassian-hosted)", value: "cloud" },
-  { label: "Jira Server / Data Center", value: "server" },
-] as const;
-
-export function ConnectionForm({
+/** Host settings screen. Same settings document as the sidebar page, rendered in host rows. */
+function ConnectionRows({
   settings,
   theme,
 }: {
-  settings: Ready;
+  settings: ReadyConnection;
   theme: PluginSurfaceProps["theme"];
 }) {
   const toast = useToast();
-  const testConnection = useRpc(testConnectionRpc);
-  // Keep the loaded revision so a save from another client conflicts instead of overwriting.
-  const [draft, setDraft] = useState(() => ({
-    values: settings.values,
-    revision: settings.revision,
-  }));
-  const [dirty, setDirty] = useState(false);
-  const update = useCallback(<Key extends keyof ConnectionValues>(key: Key) => {
-    return (value: ConnectionValues[Key]) => {
-      setDirty(true);
-      setDraft((current) => ({ ...current, values: { ...current.values, [key]: value } }));
-    };
-  }, []);
-  const save = useCallback(() => {
-    void (async () => {
-      if (await settings.save(draft.values, draft.revision)) setDirty(false);
-    })();
-  }, [settings, draft]);
-  const test = useMutation({
-    mutationFn: () => testConnection({}),
-    onSuccess: ({ displayName, baseUrl }) =>
-      toast.show(`Connected to ${baseUrl} as ${displayName}`, {
-        variant: "success",
-        durationMs: 4000,
-      }),
-    onError: (error: Error) => toast.error(error.message),
-  });
-  const styles = useMemo(
-    () => ({
-      text: { color: theme.colors.foregroundMuted },
-      error: { color: theme.colors.statusDanger },
-    }),
-    [theme],
-  );
+  const draft = useConnectionDraft(settings);
   const isServer = draft.values.kind === "server";
-  const runTest = useCallback(() => test.mutate(), [test]);
-  const info = useMemo(
-    () => (
-      <Text style={styles.text}>
-        JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, and JIRA_KIND in the daemon environment override
-        these values.
-      </Text>
-    ),
-    [styles],
-  );
+  const verify = useCallback(() => {
+    draft.verify.mutate(undefined, {
+      onSuccess: ({ displayName }) =>
+        toast.show(`Connected as ${displayName}`, { variant: "success" }),
+      onError: (error: Error) => toast.error(error.message),
+    });
+  }, [draft.verify, toast]);
+  const save = useCallback(() => void draft.save(), [draft]);
+  const errorStyle = useMemo(() => ({ color: theme.colors.statusDanger }), [theme]);
 
   return (
     <>
-      <SettingsSection title="Connection" info={info}>
+      <SettingsSection title="Connection">
         <SettingsCard>
           <SettingsSelect
             label="Deployment"
             value={draft.values.kind}
-            options={kinds}
-            disabled={settings.saving}
-            onValueChange={update("kind")}
+            options={deploymentOptions}
+            disabled={draft.saving}
+            onValueChange={draft.update("kind")}
           />
           <SettingsInput
-            label="Base URL"
-            hint={isServer ? "https://jira.example.com" : "https://your-site.atlassian.net"}
+            label="Site URL"
             initialValue={draft.values.baseUrl}
-            placeholder="https://"
-            disabled={settings.saving}
-            onChangeText={update("baseUrl")}
+            placeholder={isServer ? "https://jira.example.com" : "https://your-site.atlassian.net"}
+            disabled={draft.saving}
+            onChangeText={draft.update("baseUrl")}
           />
           <SettingsInput
-            label={isServer ? "Username (optional)" : "Account email"}
-            hint={
-              isServer
-                ? "Leave empty to send the token as a Bearer personal access token."
-                : "The Atlassian account that owns the API token."
-            }
+            label={isServer ? "Username" : "Email"}
+            hint={isServer ? "Optional with a personal access token." : undefined}
             initialValue={draft.values.email}
-            disabled={settings.saving}
-            onChangeText={update("email")}
+            disabled={draft.saving}
+            onChangeText={draft.update("email")}
           />
           <SettingsInput
             label={isServer ? "Personal access token or password" : "API token"}
             initialValue={draft.values.token}
             secureTextEntry
-            disabled={settings.saving}
-            onChangeText={update("token")}
+            disabled={draft.saving}
+            onChangeText={draft.update("token")}
+          />
+          <SettingsAction
+            label="Verify"
+            hint={draft.dirty ? "Save first." : "Signs in with the saved credentials."}
+            actionLabel={draft.verify.isPending ? "Checking…" : "Test connection"}
+            disabled={draft.verify.isPending || draft.dirty}
+            onPress={verify}
           />
         </SettingsCard>
       </SettingsSection>
@@ -124,48 +84,43 @@ export function ConnectionForm({
             label="Default JQL"
             hint="Runs when the search box is empty."
             initialValue={draft.values.defaultJql}
-            disabled={settings.saving}
-            onChangeText={update("defaultJql")}
+            disabled={draft.saving}
+            onChangeText={draft.update("defaultJql")}
           />
           <SettingsInput
             label="Provider"
-            hint="provider/model for agents started from an issue. Empty uses the first ready provider."
+            hint="provider/model. Empty uses the first ready provider."
             initialValue={draft.values.provider}
             placeholder="claude/claude-sonnet-5"
-            disabled={settings.saving}
-            onChangeText={update("provider")}
+            disabled={draft.saving}
+            onChangeText={draft.update("provider")}
           />
           <SettingsInput
             label="Start prompt"
-            hint="Sent before the issue snapshot when an agent starts on an issue."
+            hint="Sent before the issue when an agent starts on it."
             initialValue={draft.values.startPrompt}
-            disabled={settings.saving}
-            onChangeText={update("startPrompt")}
+            disabled={draft.saving}
+            onChangeText={draft.update("startPrompt")}
           />
         </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="Actions">
-        <SettingsCard>
-          <SettingsAction
-            label={dirty ? "Unsaved changes" : "Settings"}
-            actionLabel={settings.saving ? "Saving…" : "Save"}
-            disabled={settings.saving || !dirty}
-            onPress={save}
-          />
-          <SettingsAction
-            label="Verify the saved connection"
-            actionLabel={test.isPending ? "Testing…" : "Test connection"}
-            disabled={test.isPending || dirty}
-            hint={dirty ? "Save first." : undefined}
-            onPress={runTest}
-          />
-        </SettingsCard>
-        {settings.saveError ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {settings.saveError}
-          </Text>
-        ) : null}
-      </SettingsSection>
+      {draft.dirty ? (
+        <SettingsSection title="Unsaved changes">
+          <SettingsCard>
+            <SettingsAction
+              label="Apply the edits above"
+              actionLabel={draft.saving ? "Saving…" : "Save"}
+              disabled={draft.saving}
+              onPress={save}
+            />
+          </SettingsCard>
+          {draft.saveError ? (
+            <Text accessibilityRole="alert" style={errorStyle}>
+              {draft.saveError}
+            </Text>
+          ) : null}
+        </SettingsSection>
+      ) : null}
     </>
   );
 }
@@ -188,5 +143,5 @@ export function ConnectionSettings({ theme }: PluginSurfaceProps) {
         ) : null}
       </SettingsSection>
     );
-  return <ConnectionForm key={settings.revision} settings={settings} theme={theme} />;
+  return <ConnectionRows key={settings.revision} settings={settings} theme={theme} />;
 }
